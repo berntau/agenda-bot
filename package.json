@@ -1,7 +1,7 @@
 {
-  "name": "financeiro",
+  "name": "agenda-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bot pessoal de agenda no Telegram",
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -18,7 +18,8 @@
     "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.8.5"
+    "fastify": "^5.8.5",
+    "telegraf": "^4.16.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
