@@ -1,6 +1,9 @@
 import OpenAI from 'openai'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from './tasks.js'
+import { getLogs, deployProject, restartService, PROJECTS } from './deploy.js'
 import { format } from 'date-fns'
+
+const PROJECT_NAMES = Object.keys(PROJECTS) as (keyof typeof PROJECTS)[]
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
@@ -62,8 +65,60 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'getProjectLogs',
+      description: 'Busca os logs recentes de um serviço de um projeto na VPS',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: PROJECT_NAMES, description: 'Qual projeto' },
+          service: { type: 'string', description: 'Nome do serviço/container (ex: radarodd-api, financas-web)' },
+          lines: { type: 'number', description: 'Quantidade de linhas de log (padrão 50)' },
+        },
+        required: ['project', 'service'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'deployProject',
+      description: 'Faz deploy de um projeto na VPS (git pull + rebuild dos containers). Ação sensível, requer confirmação prévia do usuário.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: PROJECT_NAMES, description: 'Qual projeto' },
+        },
+        required: ['project'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'restartService',
+      description: 'Reinicia um serviço/container de um projeto na VPS. Ação sensível, requer confirmação prévia do usuário.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: PROJECT_NAMES, description: 'Qual projeto' },
+          service: { type: 'string', description: 'Nome do serviço/container a reiniciar' },
+        },
+        required: ['project', 'service'],
+      },
+    },
+  },
 ]
 
+type PendingAction = {
+  type: 'deployProject' | 'restartService'
+  project: string
+  service?: string
+}
+
+const pendingActions = new Map<number, PendingAction>()
 const conversationHistory = new Map<number, OpenAI.Chat.ChatCompletionMessageParam[]>()
 
 const SYSTEM_PROMPT = `Você é um assistente pessoal de agenda via Telegram.
@@ -72,7 +127,25 @@ Seja breve, direto e use emojis com moderação.
 Quando o usuário mencionar datas relativas (hoje, amanhã, segunda-feira), calcule a data exata.
 Sempre confirme a ação realizada de forma natural, sem mencionar nomes de funções ou termos técnicos.`
 
+const CONFIRMATION_WORDS = ['sim', 's', 'confirmo', 'confirmar', 'yes']
+
 export async function processMessage(chatId: number, userMessage: string): Promise<string> {
+  const pending = pendingActions.get(chatId)
+
+  if (pending) {
+    pendingActions.delete(chatId)
+
+    if (CONFIRMATION_WORDS.includes(userMessage.trim().toLowerCase())) {
+      try {
+        return await runPendingAction(pending)
+      } catch (error) {
+        return `❌ Falhou: ${error instanceof Error ? error.message : 'erro desconhecido'}`
+      }
+    }
+
+    return '🚫 Ação cancelada.'
+  }
+
   if (!conversationHistory.has(chatId)) {
     conversationHistory.set(chatId, [{ role: 'system', content: SYSTEM_PROMPT }])
   }
@@ -99,7 +172,7 @@ export async function processMessage(chatId: number, userMessage: string): Promi
     for (const toolCall of message.tool_calls) {
       if (toolCall.type !== 'function') continue
 
-      const result = await executeFunction(toolCall.function.name, JSON.parse(toolCall.function.arguments))
+      const result = await executeFunction(chatId, toolCall.function.name, JSON.parse(toolCall.function.arguments))
 
       history.push({
         role: 'tool',
@@ -125,7 +198,15 @@ export async function processMessage(chatId: number, userMessage: string): Promi
   return directReply
 }
 
-async function executeFunction(name: string, args: any) {
+async function executeFunction(chatId: number, name: string, args: any) {
+  try {
+    return await runFunction(chatId, name, args)
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Erro desconhecido' }
+  }
+}
+
+async function runFunction(chatId: number, name: string, args: any) {
   switch (name) {
     case 'createTask':
       return await createTask({ title: args.title, datetime: args.datetime })
@@ -135,7 +216,25 @@ async function executeFunction(name: string, args: any) {
       return await deleteTask(args.taskId)
     case 'markTaskAsDone':
       return await markTaskAsDone(args.taskId)
+    case 'getProjectLogs':
+      return await getLogs(args.project, args.service, args.lines)
+    case 'deployProject':
+      pendingActions.set(chatId, { type: 'deployProject', project: args.project })
+      return { pending: true, message: `Confirma o deploy de ${args.project}? Responda "sim" para continuar.` }
+    case 'restartService':
+      pendingActions.set(chatId, { type: 'restartService', project: args.project, service: args.service })
+      return { pending: true, message: `Confirma o restart de ${args.service} (${args.project})? Responda "sim" para continuar.` }
     default:
       return { error: 'Função desconhecida' }
   }
+}
+
+async function runPendingAction(pending: PendingAction): Promise<string> {
+  if (pending.type === 'deployProject') {
+    const result = await deployProject(pending.project)
+    return `✅ Deploy de ${pending.project} concluído.\n\n${result.stdout}`
+  }
+
+  const result = await restartService(pending.project, pending.service!)
+  return `✅ ${pending.service} (${pending.project}) reiniciado.\n\n${result}`
 }

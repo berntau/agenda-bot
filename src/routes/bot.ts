@@ -4,6 +4,15 @@ import { format } from 'date-fns'
 import { processMessage } from '../services/assistant.js'
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN!)
 
+const AUTHORIZED_CHAT_ID = Number(process.env.TELEGRAM_CHAT_ID)
+
+bot.use((ctx, next) => {
+  if (ctx.chat?.id !== AUTHORIZED_CHAT_ID) {
+    return ctx.reply('⛔ Acesso não autorizado.')
+  }
+  return next()
+})
+
 bot.command('start', (ctx) => {
   ctx.reply(`👋 Olá! Sou seu bot de agenda pessoal.
 
