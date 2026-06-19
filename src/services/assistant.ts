@@ -2,6 +2,7 @@ import OpenAI from 'openai'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from './tasks.js'
 import { getLogs, deployProject, restartService, getStatus, runMaintenanceCommand, PROJECTS } from './deploy.js'
 import { getResourceUsage, getSecurityOverview } from './infra.js'
+import { listTables, describeTable, runSqlCommand, DB_PROJECT_NAMES } from './db.js'
 import { format } from 'date-fns'
 
 const PROJECT_NAMES = Object.keys(PROJECTS) as (keyof typeof PROJECTS)[]
@@ -156,13 +157,59 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'listTables',
+      description: 'Lista as tabelas do banco de dados de um projeto (ação de leitura, não precisa de confirmação). Use antes de montar um comando SQL para saber os nomes corretos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: DB_PROJECT_NAMES, description: 'Qual projeto' },
+        },
+        required: ['project'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'describeTable',
+      description: 'Lista as colunas e tipos de uma tabela do banco de dados de um projeto (ação de leitura, não precisa de confirmação).',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: DB_PROJECT_NAMES, description: 'Qual projeto' },
+          table: { type: 'string', description: 'Nome da tabela' },
+        },
+        required: ['project', 'table'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'runSqlCommand',
+      description:
+        'Executa um único comando SQL (SELECT, INSERT, UPDATE ou DELETE) no banco de dados de um projeto. Use listTables/describeTable antes para confirmar nomes de tabelas/colunas. Comandos que alteram schema ou permissões (DROP, TRUNCATE, ALTER, GRANT etc.) não são permitidos. UPDATE/DELETE são ações sensíveis e irreversíveis: requerem confirmação prévia do usuário mostrando o SQL exato antes de executar; SELECT roda direto.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: DB_PROJECT_NAMES, description: 'Qual projeto' },
+          sql: { type: 'string', description: 'O comando SQL completo a ser executado, sem ponto e vírgula extra' },
+        },
+        required: ['project', 'sql'],
+      },
+    },
+  },
 ]
 
 type PendingAction = {
-  type: 'deployProject' | 'restartService' | 'runMaintenanceCommand'
+  type: 'deployProject' | 'restartService' | 'runMaintenanceCommand' | 'runSqlCommand'
   project: string
   service?: string
   command?: string
+  sql?: string
 }
 
 const pendingActions = new Map<number, PendingAction>()
@@ -280,6 +327,16 @@ async function runFunction(chatId: number, name: string, args: any) {
       return await getResourceUsage()
     case 'getSecurityOverview':
       return await getSecurityOverview()
+    case 'listTables':
+      return await listTables(args.project)
+    case 'describeTable':
+      return await describeTable(args.project, args.table)
+    case 'runSqlCommand':
+      if (/^select\b/i.test(args.sql.trim())) {
+        return await runSqlCommand(args.project, args.sql)
+      }
+      pendingActions.set(chatId, { type: 'runSqlCommand', project: args.project, sql: args.sql })
+      return { pending: true, message: `Confirma rodar este SQL em ${args.project}?\n\n${args.sql}\n\nResponda "sim" para continuar.` }
     default:
       return { error: 'Função desconhecida' }
   }
@@ -294,6 +351,11 @@ async function runPendingAction(pending: PendingAction): Promise<string> {
   if (pending.type === 'runMaintenanceCommand') {
     const result = await runMaintenanceCommand(pending.project, pending.command!)
     return `✅ "${pending.command}" executado em ${pending.project}.\n\n${result.stdout}`
+  }
+
+  if (pending.type === 'runSqlCommand') {
+    const result = await runSqlCommand(pending.project, pending.sql!)
+    return `✅ SQL executado em ${pending.project}.\n\n${result}`
   }
 
   const result = await restartService(pending.project, pending.service!)
