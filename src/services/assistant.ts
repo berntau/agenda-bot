@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from './tasks.js'
 import { getLogs, deployProject, restartService, getStatus, runMaintenanceCommand, PROJECTS } from './deploy.js'
 import { getResourceUsage, getSecurityOverview } from './infra.js'
-import { listTables, describeTable, runSqlCommand, DB_PROJECT_NAMES } from './db.js'
+import { listTables, describeTable, runSqlCommand, dryRunSqlCommand, DB_PROJECT_NAMES } from './db.js'
 import { format } from 'date-fns'
 
 const PROJECT_NAMES = Object.keys(PROJECTS) as (keyof typeof PROJECTS)[]
@@ -191,7 +191,7 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
     function: {
       name: 'runSqlCommand',
       description:
-        'Executa um único comando SQL (SELECT, INSERT, UPDATE ou DELETE) no banco de dados de um projeto. Use listTables/describeTable antes para confirmar nomes de tabelas/colunas. Comandos que alteram schema ou permissões (DROP, TRUNCATE, ALTER, GRANT etc.) não são permitidos. UPDATE/DELETE são ações sensíveis e irreversíveis: requerem confirmação prévia do usuário mostrando o SQL exato antes de executar; SELECT roda direto.',
+        'Executa um único comando SQL (SELECT, INSERT, UPDATE ou DELETE) no banco de dados de um projeto. Use listTables/describeTable antes para confirmar nomes de tabelas/colunas — se usar um nome errado, o comando falha com erro de coluna/tabela inexistente e você deve corrigir e chamar de novo. Comandos que alteram schema ou permissões (DROP, TRUNCATE, ALTER, GRANT etc.) não são permitidos. UPDATE/DELETE/INSERT são validados contra o banco antes (sem aplicar nada) e dependem de confirmação prévia do usuário, que vê o SQL exato e quantas linhas seriam afetadas; SELECT roda direto.',
       parameters: {
         type: 'object',
         properties: {
@@ -331,12 +331,20 @@ async function runFunction(chatId: number, name: string, args: any) {
       return await listTables(args.project)
     case 'describeTable':
       return await describeTable(args.project, args.table)
-    case 'runSqlCommand':
+    case 'runSqlCommand': {
       if (/^select\b/i.test(args.sql.trim())) {
         return await runSqlCommand(args.project, args.sql)
       }
+
+      // Valida o SQL contra o schema real (BEGIN...ROLLBACK) antes de pedir confirmação,
+      // assim um nome de coluna/tabela errado vira um erro pro próprio modelo corrigir,
+      // em vez de só aparecer pro usuário depois que ele já confirmou.
+      const { affectedRows } = await dryRunSqlCommand(args.project, args.sql)
+
       pendingActions.set(chatId, { type: 'runSqlCommand', project: args.project, sql: args.sql })
-      return { pending: true, message: `Confirma rodar este SQL em ${args.project}?\n\n${args.sql}\n\nResponda "sim" para continuar.` }
+      const rowsInfo = affectedRows !== undefined ? ` Isso vai afetar ${affectedRows} linha(s).` : ''
+      return { pending: true, message: `Confirma rodar este SQL em ${args.project}?${rowsInfo}\n\n${args.sql}\n\nResponda "sim" para continuar.` }
+    }
     default:
       return { error: 'Função desconhecida' }
   }

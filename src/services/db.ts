@@ -48,7 +48,7 @@ export async function describeTable(projectName: string, table: string) {
   )
 }
 
-export async function runSqlCommand(projectName: string, sql: string) {
+function sanitizeSql(sql: string) {
   const trimmed = sql.trim().replace(/;+$/, '')
 
   if (trimmed.includes(';')) {
@@ -59,5 +59,24 @@ export async function runSqlCommand(projectName: string, sql: string) {
     throw new Error('Esse comando altera schema/permissões e não é permitido por aqui')
   }
 
+  return trimmed
+}
+
+// Roda o comando dentro de uma transação que sempre é desfeita: serve pra validar
+// contra o schema real (nomes de coluna/tabela) e descobrir quantas linhas seriam
+// afetadas, sem aplicar nada de fato. Comandos UPDATE/DELETE/INSERT passam por aqui
+// antes de pedir confirmação ao usuário.
+export async function dryRunSqlCommand(projectName: string, sql: string) {
+  const trimmed = sanitizeSql(sql)
+  const output = await runSql(projectName, `BEGIN; ${trimmed}; ROLLBACK;`)
+
+  const tagLine = output.split('\n').find((line) => /^(insert|update|delete)\b/i.test(line))
+  const affectedRows = tagLine ? Number(tagLine.split(/\s+/).pop()) : undefined
+
+  return { affectedRows }
+}
+
+export async function runSqlCommand(projectName: string, sql: string) {
+  const trimmed = sanitizeSql(sql)
   return await runSql(projectName, `${trimmed};`)
 }
