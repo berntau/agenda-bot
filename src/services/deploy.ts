@@ -31,15 +31,19 @@ export const PROJECTS = {
 
 export type ProjectName = keyof typeof PROJECTS
 
-function getProjectOrThrow(project: string) {
-  if (!(project in PROJECTS)) {
-    throw new Error(`Projeto desconhecido: ${project}`)
+function getProjectName(projectName: string): ProjectName {
+  if (!(projectName in PROJECTS)) {
+    throw new Error(`Projeto desconhecido: ${projectName}`)
   }
-  return PROJECTS[project as ProjectName]
+  return projectName as ProjectName
+}
+
+function getProjectOrThrow(project: string) {
+  return PROJECTS[getProjectName(project)]
 }
 
 function getServiceOrThrow(project: ReturnType<typeof getProjectOrThrow>, service: string) {
-  if (!project.services.includes(service)) {
+  if (!(project.services as readonly string[]).includes(service)) {
     throw new Error(`Serviço desconhecido: ${service}`)
   }
   return service
@@ -76,4 +80,18 @@ export async function restartService(projectName: string, serviceName: string) {
   )
 
   return stdout
+}
+
+export async function getStatus(projectName?: string) {
+  const projectNames = projectName ? [getProjectName(projectName)] : (Object.keys(PROJECTS) as ProjectName[])
+
+  const results = await Promise.all(
+    projectNames.map(async (name) => {
+      const project = PROJECTS[name]
+      const { stdout } = await execAsync(`docker compose -f ${project.path}/${project.compose} ps --format "table {{.Name}}\t{{.Status}}"`)
+      return `📦 ${name}:\n${stdout.trim()}`
+    })
+  )
+
+  return results.join('\n\n')
 }

@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from './tasks.js'
-import { getLogs, deployProject, restartService, PROJECTS } from './deploy.js'
+import { getLogs, deployProject, restartService, getStatus, PROJECTS } from './deploy.js'
 import { format } from 'date-fns'
 
 const PROJECT_NAMES = Object.keys(PROJECTS) as (keyof typeof PROJECTS)[]
@@ -62,6 +62,20 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
           taskId: { type: 'number', description: 'ID da tarefa concluída' },
         },
         required: ['taskId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'getStatus',
+      description: 'Verifica a saúde/status dos containers de um projeto na VPS, ou de todos se nenhum projeto for informado',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: PROJECT_NAMES, description: 'Qual projeto (omitir para ver todos)' },
+        },
+        required: [],
       },
     },
   },
@@ -216,6 +230,8 @@ async function runFunction(chatId: number, name: string, args: any) {
       return await deleteTask(args.taskId)
     case 'markTaskAsDone':
       return await markTaskAsDone(args.taskId)
+    case 'getStatus':
+      return await getStatus(args.project)
     case 'getProjectLogs':
       return await getLogs(args.project, args.service, args.lines)
     case 'deployProject':
