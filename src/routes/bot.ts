@@ -1,7 +1,7 @@
 import { Telegraf } from 'telegraf'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from '../services/tasks.js'
 import { format } from 'date-fns'
-
+import { processMessage } from '../services/assistant.js'
 const bot = new Telegraf(process.env.TELEGRAM_TOKEN!)
 
 bot.command('start', (ctx) => {
@@ -73,5 +73,18 @@ bot.command('feito', async (ctx) => {
   await markTaskAsDone(id)
   ctx.reply(`✅ Tarefa ${id} marcada como concluída!`)
 })
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text
 
+  // Ignora se for um comando (já tratado acima)
+  if (text.startsWith('/')) return
+
+  const chatId = ctx.chat.id
+
+  // Mostra "digitando..." enquanto processa
+  await ctx.sendChatAction('typing')
+
+  const reply = await processMessage(chatId, text)
+  await ctx.reply(reply)
+})
 export default bot
