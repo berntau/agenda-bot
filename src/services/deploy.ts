@@ -8,11 +8,18 @@ export const PROJECTS = {
     path: '/home/taua/radarodd',
     compose: 'docker-compose.yml',
     services: ['radarodd-api', 'radarodd-web', 'radarodd-db'],
+    commands: {
+      migrate: { service: 'radarodd-api', exec: 'npm run migrate' },
+      seed: { service: 'radarodd-api', exec: 'npm run seed' },
+    },
   },
   financas: {
     path: '/home/taua/financas-ia',
     compose: 'docker-compose.yml',
     services: ['financas-web', 'financas-db'],
+    commands: {
+      migrate: { service: 'financas-web', exec: 'python manage.py migrate' },
+    },
   },
   imobvellor: {
     path: '/home/taua/vellorimob',
@@ -26,6 +33,9 @@ export const PROJECTS = {
       'imobvellor-redis-1',
       'imobvellor-postgres-1',
     ],
+    commands: {
+      migrate: { service: 'imobvellor-backend-1', exec: 'npm run migrate' },
+    },
   },
 } as const
 
@@ -52,9 +62,10 @@ function getServiceOrThrow(project: ReturnType<typeof getProjectOrThrow>, servic
 export async function getLogs(projectName: string, serviceName: string, lines = 50) {
   const project = getProjectOrThrow(projectName)
   const service = getServiceOrThrow(project, serviceName)
+  const safeLines = Number.isInteger(lines) && lines > 0 && lines <= 500 ? lines : 50
 
   const { stdout } = await execAsync(
-    `docker compose -f ${project.path}/${project.compose} logs --tail=${lines} ${service}`
+    `docker compose -f ${project.path}/${project.compose} logs --tail=${safeLines} ${service}`
   )
 
   return stdout.slice(-3000) // Limita o tamanho pra não quebrar o Telegram
@@ -80,6 +91,27 @@ export async function restartService(projectName: string, serviceName: string) {
   )
 
   return stdout
+}
+
+export function getAvailableCommands(projectName: string) {
+  const project = getProjectOrThrow(projectName)
+  return Object.keys(project.commands)
+}
+
+export async function runMaintenanceCommand(projectName: string, commandName: string) {
+  const project = getProjectOrThrow(projectName)
+  const command = (project.commands as Record<string, { service: string; exec: string }>)[commandName]
+
+  if (!command) {
+    throw new Error(`Comando desconhecido: ${commandName}`)
+  }
+
+  const { stdout, stderr } = await execAsync(
+    `docker compose -f ${project.path}/${project.compose} exec -T ${command.service} ${command.exec}`,
+    { timeout: 120000 }
+  )
+
+  return { stdout: stdout.slice(-2000), stderr: stderr.slice(-1000) }
 }
 
 export async function getStatus(projectName?: string) {

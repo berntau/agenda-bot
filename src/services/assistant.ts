@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { createTask, getTasksForDate, deleteTask, markTaskAsDone } from './tasks.js'
-import { getLogs, deployProject, restartService, getStatus, PROJECTS } from './deploy.js'
+import { getLogs, deployProject, restartService, getStatus, runMaintenanceCommand, PROJECTS } from './deploy.js'
+import { getResourceUsage, getSecurityOverview } from './infra.js'
 import { format } from 'date-fns'
 
 const PROJECT_NAMES = Object.keys(PROJECTS) as (keyof typeof PROJECTS)[]
@@ -124,12 +125,44 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'runMaintenanceCommand',
+      description: 'Executa um comando de manutenção pré-definido (ex: migrate, seed) em um projeto na VPS. Ação sensível, requer confirmação prévia do usuário.',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', enum: PROJECT_NAMES, description: 'Qual projeto' },
+          command: { type: 'string', description: 'Nome do comando de manutenção (ex: migrate, seed)' },
+        },
+        required: ['project', 'command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'getResourceUsage',
+      description: 'Verifica uso de CPU, memória e disco da VPS, e o consumo de cada container. Útil pra saber se cabe mais um projeto.',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'getSecurityOverview',
+      description: 'Lista portas escutando publicamente na VPS e as portas expostas por cada container',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ]
 
 type PendingAction = {
-  type: 'deployProject' | 'restartService'
+  type: 'deployProject' | 'restartService' | 'runMaintenanceCommand'
   project: string
   service?: string
+  command?: string
 }
 
 const pendingActions = new Map<number, PendingAction>()
@@ -240,6 +273,13 @@ async function runFunction(chatId: number, name: string, args: any) {
     case 'restartService':
       pendingActions.set(chatId, { type: 'restartService', project: args.project, service: args.service })
       return { pending: true, message: `Confirma o restart de ${args.service} (${args.project})? Responda "sim" para continuar.` }
+    case 'runMaintenanceCommand':
+      pendingActions.set(chatId, { type: 'runMaintenanceCommand', project: args.project, command: args.command })
+      return { pending: true, message: `Confirma rodar "${args.command}" em ${args.project}? Responda "sim" para continuar.` }
+    case 'getResourceUsage':
+      return await getResourceUsage()
+    case 'getSecurityOverview':
+      return await getSecurityOverview()
     default:
       return { error: 'Função desconhecida' }
   }
@@ -249,6 +289,11 @@ async function runPendingAction(pending: PendingAction): Promise<string> {
   if (pending.type === 'deployProject') {
     const result = await deployProject(pending.project)
     return `✅ Deploy de ${pending.project} concluído.\n\n${result.stdout}`
+  }
+
+  if (pending.type === 'runMaintenanceCommand') {
+    const result = await runMaintenanceCommand(pending.project, pending.command!)
+    return `✅ "${pending.command}" executado em ${pending.project}.\n\n${result.stdout}`
   }
 
   const result = await restartService(pending.project, pending.service!)
