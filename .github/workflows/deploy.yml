@@ -20,7 +20,8 @@ jobs:
             export NVM_DIR="$HOME/.nvm"
             source "$NVM_DIR/nvm.sh"
             cd ~/agenda-bot
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
             cat > .env << 'EOF'
             PORT=${{ vars.PORT }}
             DATABASE_URL=${{ vars.DATABASE_URL }}
