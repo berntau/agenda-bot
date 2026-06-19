@@ -15,9 +15,11 @@ export async function getResourceUsage() {
 }
 
 export async function getSecurityOverview() {
-  const [ports, dockerPorts] = await Promise.all([
+  const [ports, dockerPorts, firewall, fail2ban] = await Promise.all([
     execAsync('ss -tuln').then((r) => r.stdout.trim()),
     execAsync('docker ps --format "{{.Names}}: {{.Ports}}"').then((r) => r.stdout.trim()),
+    execAsync('sudo -n ufw status').then((r) => r.stdout.trim()),
+    execAsync('sudo -n fail2ban-client status sshd').then((r) => r.stdout.trim()),
   ])
 
   const publicPorts = ports
@@ -25,5 +27,5 @@ export async function getSecurityOverview() {
     .filter((line) => line.includes('0.0.0.0:') || line.includes('*:'))
     .join('\n')
 
-  return `🌐 Portas escutando publicamente:\n${publicPorts}\n\n📦 Portas expostas por container:\n${dockerPorts}`
+  return `🌐 Portas escutando publicamente:\n${publicPorts}\n\n📦 Portas expostas por container:\n${dockerPorts}\n\n🛡️ Firewall:\n${firewall}\n\n🚫 Fail2ban (SSH):\n${fail2ban}`
 }
