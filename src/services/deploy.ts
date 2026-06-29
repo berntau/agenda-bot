@@ -57,7 +57,7 @@ export const PROJECTS = {
   'galdino-automation': {
     path: '/home/taua/galdino-automation',
     compose: 'deploy/docker-compose.automation.yml',
-    envFile: '.env.automation',
+    envFile: 'deploy/.env.automation',
     services: ['evolution', 'n8n', 'postgres', 'redis', 'diun'],
     commands: {
       // Rebuilda a imagem custom do Evolution (Dockerfile local com Baileys atualizado)
