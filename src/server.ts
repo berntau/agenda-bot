@@ -2,7 +2,7 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import dotenv from 'dotenv'
 import bot from './routes/bot.js'
-import { startContainerMonitor } from './services/monitor.js'
+import { startContainerMonitor, startEvolutionMonitor } from './services/monitor.js'
 
 dotenv.config()
 
@@ -20,6 +20,7 @@ await server.listen({ port, host: '127.0.0.1' })
 bot.launch()
 
 startContainerMonitor(bot, Number(process.env.TELEGRAM_CHAT_ID))
+startEvolutionMonitor(bot, Number(process.env.TELEGRAM_CHAT_ID))
 
 process.once('SIGINT', () => bot.stop('SIGINT'))
 process.once('SIGTERM', () => bot.stop('SIGTERM'))
