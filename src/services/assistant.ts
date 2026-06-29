@@ -215,11 +215,16 @@ type PendingAction = {
 const pendingActions = new Map<number, PendingAction>()
 const conversationHistory = new Map<number, OpenAI.Chat.ChatCompletionMessageParam[]>()
 
-const SYSTEM_PROMPT = `Você é um assistente pessoal de agenda via Telegram.
-Hoje é ${format(new Date(), 'yyyy-MM-dd')} (formato YYYY-MM-DD).
+function buildSystemPrompt() {
+  const now = new Date()
+  const date = format(now, 'yyyy-MM-dd')
+  const time = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+  return `Você é um assistente pessoal de agenda via Telegram.
+Agora são ${time} (horário de Brasília) do dia ${date} (formato YYYY-MM-DD).
 Seja breve, direto e use emojis com moderação.
 Quando o usuário mencionar datas relativas (hoje, amanhã, segunda-feira), calcule a data exata.
 Sempre confirme a ação realizada de forma natural, sem mencionar nomes de funções ou termos técnicos.`
+}
 
 const CONFIRMATION_WORDS = ['sim', 's', 'confirmo', 'confirmar', 'yes']
 
@@ -241,7 +246,7 @@ export async function processMessage(chatId: number, userMessage: string): Promi
   }
 
   if (!conversationHistory.has(chatId)) {
-    conversationHistory.set(chatId, [{ role: 'system', content: SYSTEM_PROMPT }])
+    conversationHistory.set(chatId, [{ role: 'system', content: buildSystemPrompt() }])
   }
 
   const history = conversationHistory.get(chatId)!
