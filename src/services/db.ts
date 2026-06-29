@@ -8,6 +8,8 @@ const DB_PROJECTS = {
   financas: { service: 'financas-db', user: 'financas', database: 'financas' },
   radarodd: { service: 'radarodd-db', user: 'radar', database: 'radarodd' },
   imobvellor: { service: 'postgres', user: 'imobvellor', database: 'imobvellor' },
+  'anki-concursos': { service: 'db', user: 'app', database: 'app' },
+  'galdino-concept': { service: 'db', user: 'app', database: 'app' },
 } as const
 
 export const DB_PROJECT_NAMES = Object.keys(DB_PROJECTS) as (keyof typeof DB_PROJECTS)[]
